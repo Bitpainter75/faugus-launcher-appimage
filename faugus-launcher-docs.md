@@ -299,6 +299,14 @@ sudo dnf install python3-gobject SDL2
 - Proton muss separat installiert/heruntergeladen werden
 - EA App / Battle.net erfordern ggf. zusätzliche Konfiguration
 
+### AppImage (behoben in Build-Skript v1.22.4+)
+
+| Problem | Ursache | Fix |
+|---|---|---|
+| „+" / „Neu"-Button tut nichts | `faugus-banner.png` lag in `assets/`-Unterordner statt direkt in `usr/share/faugus-launcher/` — `shutil.copyfile()` warf FileNotFoundError, GTK schluckte die Exception | Banner + OGG-Datei werden jetzt direkt nach `usr/share/faugus-launcher/` kopiert |
+| Settings-Fenster falsch positioniert/skaliert (Aurora/KDE) | `Settings(Gtk.Dialog)` übergab den Parent nicht als `transient_for` → KWin behandelt das Fenster ohne Parent-Bezug | `super().__init__(transient_for=parent)` |
+| Absturz `apply_dark_theme()` auf KDE | `Gio.Settings.new("org.gnome.desktop.interface")` schlägt fehl, wenn das GNOME-Schema nicht installiert ist | Outer try/except mit Portal-Fallback |
+
 ---
 
 ## Links

@@ -54,6 +54,17 @@ fi
 
 SRC="$(pwd)/faugus-launcher-src"
 
+# Patches einspielen: gepatchte Dateien aus dem Build-Verzeichnis übernehmen,
+# falls vorhanden (ermöglicht Fixes ohne Fork des Upstream-Repos).
+PATCH_SRC="$(pwd)/faugus-launcher-${VERSION}"
+if [ -d "$PATCH_SRC" ]; then
+    info "Übernehme Patches aus ${PATCH_SRC}..."
+    cp -v "$PATCH_SRC/faugus/utils.py"    "$SRC/faugus/utils.py"
+    cp -v "$PATCH_SRC/faugus/launcher.py" "$SRC/faugus/launcher.py"
+else
+    warn "Kein Patch-Verzeichnis ${PATCH_SRC} gefunden — nutze unverändertes Upstream."
+fi
+
 # ── 3. AppDir-Struktur erstellen ─────────────────────────────────────────────
 
 info "Erstelle AppDir-Struktur..."
@@ -99,8 +110,13 @@ chmod +x "$APPDIR/usr/bin/faugus-run"
 # Python-Paket
 cp -r "$SRC/faugus" "$APPDIR/usr/share/faugus-launcher/"
 
-# Assets
+# Assets (ganzes Verzeichnis für Icons etc.)
 cp -r "$SRC/assets" "$APPDIR/usr/share/faugus-launcher/"
+# Banner und Notification-Sound direkt ins Datenverzeichnis kopieren.
+# PathManager.system_data('faugus-launcher/faugus-banner.png') sucht
+# in {XDG_DATA_DIR}/faugus-launcher/ — NICHT in assets/.
+cp "$SRC/assets/faugus-banner.png"        "$APPDIR/usr/share/faugus-launcher/"
+cp "$SRC/assets/faugus-notification.ogg"  "$APPDIR/usr/share/faugus-launcher/"
 
 # Sprachen
 if [ -d "$SRC/languages" ]; then
@@ -147,6 +163,15 @@ elif command -v convert &>/dev/null; then
        "$APPDIR/faugus-launcher.png"
 else
     warn "Kein SVG→PNG-Konverter gefunden (rsvg-convert/inkscape/convert). Nutze SVG direkt."
+fi
+
+# GTK-Icon-Theme-Cache aktualisieren, damit Gtk.Image.new_from_icon_name()
+# die gebündelten symbolischen Icons ohne Cache-Lookup-Fehler findet.
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache -q -t -f "$APPDIR/usr/share/icons/hicolor"
+    info "Icon-Cache aktualisiert."
+else
+    warn "gtk-update-icon-cache nicht gefunden — Icons werden per Verzeichnis-Scan gesucht."
 fi
 
 # ── 7. .desktop-Datei ────────────────────────────────────────────────────────
