@@ -6,7 +6,7 @@ set -e
 # Target: x86_64 Linux
 
 APPDIR="$(pwd)/AppDir"
-VERSION="1.22.4"
+VERSION="1.22.6"
 ARCH="x86_64"
 OUTPUT="faugus-launcher-${VERSION}-${ARCH}.AppImage"
 
@@ -45,25 +45,90 @@ fi
 
 # ── 2. Quellcode holen ───────────────────────────────────────────────────────
 
+TARBALL="$(pwd)/faugus-launcher-${VERSION}.tar.gz"
+
 if [ ! -d "faugus-launcher-src" ]; then
-    info "Klone Repository..."
-    git clone --depth=1 https://github.com/Faugus/faugus-launcher.git faugus-launcher-src
+    if [ -f "$TARBALL" ]; then
+        info "Extrahiere lokalen Tarball ${TARBALL}..."
+        tar xzf "$TARBALL"
+        mv "faugus-launcher-${VERSION}" faugus-launcher-src
+    else
+        info "Klone Repository..."
+        git clone --depth=1 https://github.com/Faugus/faugus-launcher.git faugus-launcher-src
+    fi
 else
-    info "Repository bereits vorhanden, überspringe Clone."
+    info "Quellverzeichnis bereits vorhanden, überspringe Extraktion."
 fi
 
 SRC="$(pwd)/faugus-launcher-src"
 
-# Patches einspielen: gepatchte Dateien aus dem Build-Verzeichnis übernehmen,
-# falls vorhanden (ermöglicht Fixes ohne Fork des Upstream-Repos).
-PATCH_SRC="$(pwd)/faugus-launcher-${VERSION}"
-if [ -d "$PATCH_SRC" ]; then
-    info "Übernehme Patches aus ${PATCH_SRC}..."
-    cp -v "$PATCH_SRC/faugus/utils.py"    "$SRC/faugus/utils.py"
-    cp -v "$PATCH_SRC/faugus/launcher.py" "$SRC/faugus/launcher.py"
-else
-    warn "Kein Patch-Verzeichnis ${PATCH_SRC} gefunden — nutze unverändertes Upstream."
-fi
+# ── 2b. Patches einspielen ───────────────────────────────────────────────────
+
+info "Wende Patches an..."
+
+# Fix 1 – utils.py: org.gnome.desktop.interface fehlt auf KDE (Bazzite/Aurora)
+# Gio.Settings.new() wirft ohne das Schema eine unbehandelte Exception, die
+# do_startup abbricht → Buttons reagieren nicht mehr.
+python3 - "$SRC/faugus/utils.py" <<'PYEOF'
+import sys, re
+path = sys.argv[1]
+src = open(path).read()
+old = """\
+    else:
+        desktop_env = Gio.Settings.new("org.gnome.desktop.interface")
+        try:
+            is_dark_theme = desktop_env.get_string("color-scheme") == "prefer-dark"
+        except Exception:
+            is_dark_theme = "-dark" in desktop_env.get_string("gtk-theme")
+        if is_dark_theme:
+            Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)"""
+new = """\
+    else:
+        try:
+            desktop_env = Gio.Settings.new("org.gnome.desktop.interface")
+            try:
+                is_dark_theme = desktop_env.get_string("color-scheme") == "prefer-dark"
+            except Exception:
+                is_dark_theme = "-dark" in desktop_env.get_string("gtk-theme")
+        except Exception:
+            # org.gnome.desktop.interface schema not available (e.g. KDE/Bazzite/Aurora)
+            is_dark_theme = False
+        if is_dark_theme:
+            Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)"""
+if old in src:
+    open(path, 'w').write(src.replace(old, new, 1))
+    print("  utils.py: Patch angewendet.")
+else:
+    print("  utils.py: Patch bereits vorhanden oder nicht nötig.")
+PYEOF
+
+# Fix 2 – launcher.py: AppImage-Icons nicht im GTK-Icon-Theme
+# Gtk.Image.new_from_icon_name() findet gebündelte Icons nur, wenn der AppDir-
+# Pfad explizit in das Standard-IconTheme eingetragen wird.
+python3 - "$SRC/faugus/launcher.py" <<'PYEOF'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = """\
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        os.environ["GTK_USE_PORTAL"] = "1"
+        apply_dark_theme()"""
+new = """\
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        os.environ["GTK_USE_PORTAL"] = "1"
+        appdir = os.environ.get("APPDIR", "")
+        if appdir:
+            Gtk.IconTheme.get_default().prepend_search_path(
+                os.path.join(appdir, "usr/share/icons"))
+        apply_dark_theme()"""
+if old in src:
+    open(path, 'w').write(src.replace(old, new, 1))
+    print("  launcher.py: Patch angewendet.")
+else:
+    print("  launcher.py: Patch bereits vorhanden oder nicht nötig.")
+PYEOF
 
 # ── 3. AppDir-Struktur erstellen ─────────────────────────────────────────────
 
